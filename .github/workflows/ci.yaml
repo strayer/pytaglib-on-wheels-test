@@ -1,0 +1,61 @@
+name: Test pytaglib-on-wheels wheels
+
+on: [push]
+
+jobs:
+  test_wheels:
+    name: ${{ matrix.os }} ${{ matrix.arch }}, Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, windows-2019, macos-11]
+        arch: [x86_64, arm64]
+        python: ['3.6', '3.7', '3.8', '3.9', '3.10', '3.11']
+        exclude:
+          - os: windows-2019
+            arch: arm64
+          - os: macos-11
+            arch: arm64
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux' && matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: all
+
+      - uses: actions/setup-python@v4
+        if: runner.os != 'Linux' || matrix.arch != 'arm64'
+        with:
+          python-version: ${{ matrix.python }}
+
+#      - name: Install TagLib (Unix)
+#        if: runner.os != 'Windows' && matrix.arch != 'arm64'
+#        run: if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get install -y libtag1-dev ; else brew install taglib ; fi
+
+      - name: Run test in Docker (Linux arm64)
+        if: runner.os == 'Linux' && matrix.arch == 'arm64'
+        run: |
+          docker run --rm --platform linux/arm64 -v $(pwd)/test.mp3:/test.mp3:ro -v $(pwd)/linux-arm64-test.sh:/linux-arm64-test.sh:ro python:${{ matrix.python }} bash /linux-arm64-test.sh
+
+      - name: Run test (Linux/macOS x86_64)
+        if: runner.os == 'macOS' || (runner.os == 'Linux' && matrix.arch == 'x86_64')
+        # env:
+        #   PYTAGLIB_CYTHONIZE: '1'
+        run: |
+          #pip install Cython
+          pip install -U pip wheel
+          pip install pytaglib
+          title=`python -c "import taglib; print(taglib.File('test.mp3').tags['TITLE'][0])"`
+
+          test "${title}" == "Hooray!"
+
+      - name: Run test (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pip install -U pip wheel
+          pip install pytaglib
+          python -c "import taglib; import sys; sys.exit(1) if taglib.File('test.mp3').tags['TITLE'][0] != 'Hooray!' else sys.exit(0)"
